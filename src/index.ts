@@ -30,6 +30,9 @@ const calculateReadingTime = (content: string): string => {
   return `${minutes} min read`;
 };
 
+// normalize incoming content by converting literal "\n" sequences to real newlines
+const normalizeContent = (raw: string): string => raw.replace(/\\r?\\n/g, '\n');
+
 // GET /posts/latest/:count
 app.get('/posts/latest/:count', async (req: Request, res: Response) => {
   const count = parseInt(req.params.count, 10);
@@ -70,10 +73,24 @@ app.post('/posts', requireAuth, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'state must be draft or published' });
   }
   try {
-    const readingTime = calculateReadingTime(content);
+    let normalizedTags: any[] = [];
+    if (Array.isArray(tags)) {
+      normalizedTags = tags;
+    } else if (typeof tags === 'string') {
+      try {
+        const parsed = JSON.parse(tags);
+        if (Array.isArray(parsed)) normalizedTags = parsed;
+      } catch (_err) {
+        // ignore parse errors and keep tags empty
+      }
+    }
+    const normalizedContent = normalizeContent(content);
+    const readingTime = calculateReadingTime(normalizedContent);
     const r = await pool.query(
-      'INSERT INTO posts (slug, title, content, state, excerpt, tags, reading_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [slug, title, content, state || 'draft', excerpt || null, tags || '[]', readingTime]
+      `INSERT INTO posts (slug, title, content, state, excerpt, tags, reading_time)
+       VALUES ($1,$2,$3,$4,$5, COALESCE($6::jsonb, '[]'::jsonb), $7)
+       RETURNING *`,
+      [slug, title, normalizedContent, state || 'draft', excerpt || null, JSON.stringify(normalizedTags), readingTime]
     );
     res.status(201).json(r.rows[0]);
   } catch (e: any) {
