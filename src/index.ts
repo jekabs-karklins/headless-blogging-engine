@@ -24,6 +24,12 @@ const requireAuth = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
+const calculateReadingTime = (content: string): string => {
+  const words = content.trim().split(/\s+/).length;
+  const minutes = Math.ceil(words / 200);
+  return `${minutes} min read`;
+};
+
 // GET /posts/latest/:count
 app.get('/posts/latest/:count', async (req: Request, res: Response) => {
   const count = parseInt(req.params.count, 10);
@@ -31,7 +37,7 @@ app.get('/posts/latest/:count', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'count must be a positive number' });
   }
   try {
-    const r = await pool.query('SELECT id, title, excerpt, tags, state, created_at FROM posts ORDER BY created_at DESC LIMIT $1', [count]);
+    const r = await pool.query('SELECT id, slug, title, excerpt, tags, state, reading_time, created_at FROM posts ORDER BY created_at DESC LIMIT $1', [count]);
     res.json(r.rows);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -42,7 +48,7 @@ app.get('/posts/latest/:count', async (req: Request, res: Response) => {
 app.get('/posts/:id?', async (req: Request, res: Response) => {
   try {
     if (req.params.id) {
-      const r = await pool.query('SELECT * FROM posts WHERE id=$1', [req.params.id]);
+      const r = await pool.query('SELECT * FROM posts WHERE id::text=$1 OR slug=$1 LIMIT 1', [req.params.id]);
       return r.rows[0]
         ? res.json(r.rows[0])
         : res.status(404).json({ error: 'not found' });
@@ -56,17 +62,18 @@ app.get('/posts/:id?', async (req: Request, res: Response) => {
 
 // POST /posts
 app.post('/posts', requireAuth, async (req: Request, res: Response) => {
-  const { title, content, state, excerpt, tags } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ error: 'title+content required' });
+  const { slug, title, content, state, excerpt, tags } = req.body;
+  if (!slug || !title || !content) {
+    return res.status(400).json({ error: 'slug+title+content required' });
   }
   if (state && !['draft', 'published'].includes(state)) {
     return res.status(400).json({ error: 'state must be draft or published' });
   }
   try {
+    const readingTime = calculateReadingTime(content);
     const r = await pool.query(
-      'INSERT INTO posts (title, content, state, excerpt, tags) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [title, content, state || 'draft', excerpt || null, tags || '[]']
+      'INSERT INTO posts (slug, title, content, state, excerpt, tags, reading_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [slug, title, content, state || 'draft', excerpt || null, tags || '[]', readingTime]
     );
     res.status(201).json(r.rows[0]);
   } catch (e: any) {
