@@ -71,5 +71,18 @@ app.post('/posts', async (req, res) => {
   }
 });
 
+// DELETE /posts/:id
+app.delete('/posts/:id', async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM posts WHERE id=$1 RETURNING *', [req.params.id]);
+    if (r.rowCount === 0) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    res.json({ message: 'deleted', post: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Listening on :${PORT}`));
